@@ -1,30 +1,27 @@
 #!/usr/bin/env bash
-# agent-sync — single-file cross-machine sync for coding agents (vault edition).
+# agent-sync — single-file cross-machine sync for coding agents.
 #
-# Session/memory transcripts can contain secrets, so they live in ONE private
-# vault repo (~/.agent-vault by default), NOT in your project repos. Each agent's
-# real storage location is symlinked into the vault:
-#
-#   claude   ~/.claude/projects/<encoded>            ->  $VAULT/claude/<encoded>/
-#   codex    ~/.codex/{sessions,memories,skills}     ->  $VAULT/codex/...
-#   opencode (exported)                              ->  $VAULT/opencode/<encoded>/
-#
-# Only non-sensitive project files stay in the project: .claude/skills/ and
-# .claude/memory/. Make ~/.agent-vault a PRIVATE git repo and push it to sync.
+# Syncs memory / sessions / skills across machines for three agents:
+#   claude   (Claude Code)  sessions + auto-memory -> symlink into .claude/sessions/
+#   opencode (opencode)     sessions -> export/import into .opencode/sessions/ + `oc` alias
+#   codex    (Codex CLI)    sessions -> copy filtered by cwd; memories/skills -> snapshot
 #
 # Usage (copy this file into your project root, then run):
 #   ./setup.sh                  init all three
 #   ./setup.sh claude           init claude only
 #   ./setup.sh opencode         init opencode only
 #   ./setup.sh codex            init codex only
-#   ./setup.sh oc               launch opencode, then export sessions to the vault
+#   ./setup.sh oc               alias target: launch opencode, then export sessions to git
 #   ./setup.sh --help           this help
 #
 # Idempotent: safe to re-run. Never writes API keys.
+#
+# PRIVACY: session transcripts record everything you type (including API keys).
+# Use a PRIVATE repo for this project while developing; don't push the synced
+# .claude/sessions, .opencode/sessions or .codex/sessions to a public repo.
 set -euo pipefail
 
 PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VAULT="${AGENT_VAULT:-$HOME/.agent-vault}"
 
 info() { printf '==> %s\n' "$*"; }
 ok()   { printf '    [ok] %s\n' "$*"; }
@@ -36,9 +33,8 @@ usage() {
 
 # --- helpers ----------------------------------------------------------------
 
-# Idempotent symlink: link path -> real dir inside the vault.
-# If a real dir already exists at $link, merge its contents into the vault first.
-ensure_symlink() {  # $1 = link path, $2 = real dir in vault
+# Idempotent symlink: link path (in ~/.claude) -> real dir inside the project.
+ensure_symlink() {  # $1 = link path, $2 = real dir in project
   local link="$1" real="$2"
   mkdir -p "$real"
   if [ -L "$link" ]; then
@@ -72,7 +68,7 @@ PYEOF
   ok "alias $name -> $cmd  (run 'source ~/.zshrc' to activate)"
 }
 
-# Create a project dir with a one-line README so git tracks it even when empty.
+# Create a dir with a one-line README so git tracks it even when empty.
 seed_dir() {  # $1 = dir, $2 = description
   local dir="$1" desc="$2"
   mkdir -p "$dir"
@@ -84,44 +80,38 @@ seed_dir() {  # $1 = dir, $2 = description
   fi
 }
 
-# Ensure the vault exists and is a git repo.
-init_vault() {
-  mkdir -p "$VAULT"
-  if [ ! -d "$VAULT/.git" ]; then
-    git -C "$VAULT" init -q 2>/dev/null || true
-    ok "initialized vault git repo: $VAULT"
-  fi
-  if [ ! -f "$VAULT/README.md" ]; then
-    printf '# agent-vault\n\nPrivate store for coding-agent sessions/memory.\nKeep this repo PRIVATE — transcripts can contain secrets.\n' > "$VAULT/README.md"
-  fi
+# Bidirectional add-only snapshot of a GLOBAL dir into the project (no symlink,
+# so multiple projects don't fight over ~/.codex/...).
+sync_global_dir() {  # $1 = global dir, $2 = project dir
+  local g="$1" p="$2"
+  mkdir -p "$g" "$p"
+  cp -Rnp "$g/." "$p/" 2>/dev/null || true   # global -> project (add missing)
+  cp -Rnp "$p/." "$g/" 2>/dev/null || true   # project -> global (restore on new machine)
+  ok "snapshot synced: $p"
 }
-
-# The encoded project path Claude Code uses as its per-project storage dir name.
-encoded() { printf '%s' "$PROJECT" | sed 's|[^A-Za-z0-9]|-|g'; }
 
 # --- claude -----------------------------------------------------------------
 
 init_claude() {
   info "claude (Claude Code)"
-  init_vault
-  seed_dir "$PROJECT/.claude/skills" "Shared skills (non-secret, stays in the project)."
-  seed_dir "$PROJECT/.claude/memory" "Project memory (non-secret, stays in the project)."
-  mkdir -p "$VAULT/claude/$(encoded)"
-  ensure_symlink "$HOME/.claude/projects/$(encoded)" "$VAULT/claude/$(encoded)"
+  seed_dir "$PROJECT/.claude/sessions" "Claude Code session transcripts + auto-memory. Symlinked from ~/.claude/projects/<encoded>."
+  seed_dir "$PROJECT/.claude/skills"   "Shared skills; auto-loaded by Claude Code, referenced by opencode via skills.paths."
+  seed_dir "$PROJECT/.claude/memory"   "Long-lived project notes; git-tracked."
+  local encoded
+  encoded="$(printf '%s' "$PROJECT" | sed 's|[^A-Za-z0-9]|-|g')"
+  ensure_symlink "$HOME/.claude/projects/$encoded" "$PROJECT/.claude/sessions"
 }
 
 # --- opencode ---------------------------------------------------------------
 
 init_opencode() {
   info "opencode"
-  init_vault
-  local sess_dir="$VAULT/opencode/$(encoded)"
-  mkdir -p "$sess_dir"
+  seed_dir "$PROJECT/.opencode/sessions" "Exported opencode sessions (JSON). Auto-exported by the oc alias after each run."
   if ! command -v opencode >/dev/null 2>&1; then
     warn "opencode not installed (brew install opencode-ai); skipping import"
   else
     local db="${OPENCODE_DB:-$HOME/.local/share/opencode/opencode.db}" n=0 id
-    for f in "$sess_dir"/*.json; do
+    for f in "$PROJECT"/.opencode/sessions/*.json; do
       [ -e "$f" ] || continue
       id="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("info",{}).get("id",""))' "$f" 2>/dev/null || true)"
       if [ -n "$id" ] && [ -f "$db" ] && sqlite3 "$db" "SELECT 1 FROM session WHERE id='$id';" 2>/dev/null | grep -q 1; then
@@ -142,15 +132,59 @@ init_opencode() {
 
 init_codex() {
   info "codex (Codex CLI)"
-  init_vault
-  mkdir -p "$VAULT/codex/sessions" "$VAULT/codex/memories" "$VAULT/codex/skills"
-  ensure_symlink "$HOME/.codex/sessions" "$VAULT/codex/sessions"
-  ensure_symlink "$HOME/.codex/memories" "$VAULT/codex/memories"
-  ensure_symlink "$HOME/.codex/skills"   "$VAULT/codex/skills"
-  if [ ! -f "$VAULT/codex/skills/.gitignore" ]; then
-    printf '.system/\n' > "$VAULT/codex/skills/.gitignore"
-    ok "gitignored $VAULT/codex/skills/.system/"
+  seed_dir "$PROJECT/.codex/sessions"  "Codex CLI sessions for THIS project only (filtered by cwd)."
+  seed_dir "$PROJECT/.codex/memories"  "Snapshot of global ~/.codex/memories."
+  seed_dir "$PROJECT/.codex/skills"    "Snapshot of global ~/.codex/skills (bundled .system/ gitignored)."
+
+  # memories + skills are global per-user; snapshot them (no symlink, no competition).
+  sync_global_dir "$HOME/.codex/memories" "$PROJECT/.codex/memories"
+  sync_global_dir "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
+  if [ ! -f "$PROJECT/.codex/skills/.gitignore" ]; then
+    printf '.system/\n' > "$PROJECT/.codex/skills/.gitignore"
+    ok "gitignored .codex/skills/.system/"
   fi
+
+  # sessions: codex stores them globally (not per-project), so filter by cwd
+  # and COPY only this project's rollouts into the repo.
+  sync_codex_sessions
+}
+
+# Print the cwd recorded in a rollout's session_meta line (empty if none).
+codex_rollout_cwd() {  # $1 = rollout jsonl path
+  python3 - "$1" <<'PYEOF'
+import json, sys
+cwd = ""
+for line in open(sys.argv[1], errors="replace"):
+    if '"session_meta"' not in line:
+        continue
+    try:
+        d = json.loads(line)
+    except Exception:
+        continue
+    if d.get("type") == "session_meta":
+        cwd = d.get("payload", {}).get("cwd") or ""
+        break
+print(cwd)
+PYEOF
+}
+
+sync_codex_sessions() {
+  local src="$HOME/.codex/sessions" dst="$PROJECT/.codex/sessions" n=0 cwd name
+  if [ ! -d "$src" ] || [ -L "$src" ]; then
+    warn "~/.codex/sessions missing or is a symlink (left by an old agent-sync); restore it, then re-run"
+    return 0
+  fi
+  while IFS= read -r f; do
+    cwd="$(codex_rollout_cwd "$f")"
+    if [ -n "$cwd" ] && { [ "$cwd" = "$PROJECT" ] || [[ "$cwd" == "$PROJECT/"* ]]; }; then
+      name="$(basename "$f")"
+      if [ ! -e "$dst/$name" ]; then
+        cp -p "$f" "$dst/$name"
+        n=$((n+1))
+      fi
+    fi
+  done < <(find -L "$src" -name 'rollout-*.jsonl' 2>/dev/null)
+  ok "copied $n codex session(s) for this project (re-run to pick up new ones)"
 }
 
 # --- oc launcher ------------------------------------------------------------
@@ -170,7 +204,7 @@ run_oc() {
       opencode --auto "$@" ;;
   esac
 
-  local db="$HOME/.local/share/opencode/opencode.db" sess_dir="$VAULT/opencode/$(encoded)" count=0 id
+  local db="$HOME/.local/share/opencode/opencode.db" sess_dir="$PROJECT/.opencode/sessions" count=0 id
   mkdir -p "$sess_dir"
   if [ ! -f "$db" ]; then
     warn "no opencode db found; nothing exported"; return 0
@@ -185,12 +219,12 @@ run_oc() {
     fi
   done
   if [ "$count" -gt 0 ]; then
-    git -C "$VAULT" add "$sess_dir" 2>/dev/null || true
+    git add "$sess_dir" 2>/dev/null || true
     if [ "${OC_AUTOCOMMIT:-0}" = "1" ]; then
-      git -C "$VAULT" commit -m "sync opencode sessions ($(date +%F))" 2>/dev/null || true
-      ok "exported + committed $count session(s) to vault"
+      git commit -m "sync opencode sessions ($(date +%F))" 2>/dev/null || true
+      ok "exported + committed $count session(s)"
     else
-      ok "exported $count session(s) -> $sess_dir (staged in vault; set OC_AUTOCOMMIT=1 to auto-commit)"
+      ok "exported $count session(s) -> .opencode/sessions/ (staged; set OC_AUTOCOMMIT=1 to auto-commit)"
     fi
   else
     info "no opencode sessions to export"
@@ -220,9 +254,6 @@ else
 fi
 
 echo
-info "done. session data now lives in the vault: $VAULT"
-info "commit skills/memory in the project, and the vault separately:"
-info "  # project (non-secret)"
-info "  git add .claude && git commit -m 'agent-sync: init project dirs'"
-info "  # vault (private) — push to a PRIVATE remote to sync across machines"
-info "  git -C $VAULT add -A && git -C $VAULT commit -m 'sync agent data'"
+info "done. commit the synced dirs to git to share them across machines:"
+info "  git add .claude .opencode .codex && git commit -m 'agent-sync: sync agent data'"
+info "  (keep this repo PRIVATE while developing — transcripts may contain secrets)"
