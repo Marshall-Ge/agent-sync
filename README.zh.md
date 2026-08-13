@@ -1,5 +1,7 @@
 # agent-sync
 
+总是在不同的主机上面开发同一个项目，苦于agent的历史session无法随项目迁移？这个工具让你不用每次在新主机上重开agent上下文对话。
+
 单文件跨机同步工具 —— 让 [Claude Code](https://claude.com/claude-code)、[opencode](https://opencode.ai)、[Codex CLI](https://github.com/openai/codex) 的 **memory / sessions / skills** 在多台机器间保持一致。
 
 把单个 `setup.sh` 拷进你的项目,运行一次,这些 agent 的状态就存进仓库(git 跟踪),跟着 `git clone` 到处走。
