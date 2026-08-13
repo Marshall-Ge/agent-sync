@@ -49,7 +49,7 @@ cd <你的仓库>
 ## 原理
 
 - **Claude Code** 把会话(和 auto-memory)存在 `~/.claude/projects/<编码路径>/`。`setup.sh` 把该目录软链到 `.claude/sessions/`，转录直接写进仓库。
-- **opencode** 的会话在全局 sqlite 里，无法按项目软链。`setup.sh` 装一个 `oc` 别名：启动 opencode，退出时把本项目会话导出到 `.opencode/sessions/` 并 git add。
+- **opencode** 的会话在全局 sqlite 里，无法按项目软链。`setup.sh` 装一个 cwd 感知的 `oc` 包装函数（通过 `.agent-sync` 标记定位最近的项目）：启动 opencode，退出时把本项目会话导出到 `.opencode/sessions/` 并 git add。用 `oc`，不要裸跑 `opencode`。
 - **Codex CLI** 的会话全局存在 `~/.codex/sessions/`(不按项目分)。`setup.sh` 按每个 rollout 里的 `cwd` 过滤，只把本项目的会话复制进 `.codex/sessions/`；全局的 `memories`/`skills` 用「双向 add-only 快照」，多项目不抢 `~/.codex`。
 
 ## 命令

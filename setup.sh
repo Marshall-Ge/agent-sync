@@ -52,20 +52,37 @@ ensure_symlink() {  # $1 = link path, $2 = real dir in project
   fi
 }
 
-# Idempotent zsh alias writer.
-write_alias() {  # $1 = alias name, $2 = raw command
-  local name="$1" cmd="$2" zshrc="$HOME/.zshrc"
+# Idempotent cwd-aware `oc` wrapper: finds the nearest agent-sync project from
+# $PWD (via the .agent-sync marker) and runs its setup.sh oc. No single global
+# alias fighting over which project it points to.
+write_oc_func() {
+  local zshrc="$HOME/.zshrc"
   touch "$zshrc"
-  python3 - "$zshrc" "$name" "$cmd" <<'PYEOF'
+  python3 - "$zshrc" <<'PYEOF'
 import re, sys
-path, name, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
+path = sys.argv[1]
 s = open(path).read()
-s = re.sub(rf'^alias {re.escape(name)}=.*\n', '', s, flags=re.M)
-s = re.sub(rf'^# agent-sync: {re.escape(name)} alias\n', '', s, flags=re.M)
-s = s.rstrip() + f"\n\n# agent-sync: {name} alias\nalias {name}='{cmd}'\n"
+s = re.sub(r'^alias oc=.*\n', '', s, flags=re.M)
+s = re.sub(r'^# >>> agent-sync: oc >>>\n.*?^# <<< agent-sync: oc <<<\n', '', s, flags=re.M | re.S)
+block = (
+    '# >>> agent-sync: oc >>>\n'
+    'oc() {\n'
+    '  local p="$PWD"\n'
+    '  while [ "$p" != "/" ]; do\n'
+    '    if [ -f "$p/.agent-sync" ]; then\n'
+    '      "$p/setup.sh" oc "$@"; return $?\n'
+    '    fi\n'
+    '    p="$(dirname "$p")"\n'
+    '  done\n'
+    '  echo "oc: not in an agent-sync project (run setup.sh first)" >&2\n'
+    '  return 1\n'
+    '}\n'
+    '# <<< agent-sync: oc <<<\n'
+)
+s = s.rstrip() + "\n\n" + block
 open(path, 'w').write(s)
 PYEOF
-  ok "alias $name -> $cmd  (run 'source ~/.zshrc' to activate)"
+  ok "wrote cwd-aware oc() to ~/.zshrc  (run 'source ~/.zshrc' to activate)"
 }
 
 # Create a dir with a one-line README so git tracks it even when empty.
@@ -125,7 +142,8 @@ init_opencode() {
     done
     info "  imported $n opencode session(s)"
   fi
-  write_alias oc "$PROJECT/setup.sh oc"
+  touch "$PROJECT/.agent-sync"
+  write_oc_func
 }
 
 # --- codex ------------------------------------------------------------------
@@ -254,6 +272,9 @@ else
 fi
 
 echo
-info "done. commit the synced dirs to git to share them across machines:"
-info "  git add .claude .opencode .codex && git commit -m 'agent-sync: sync agent data'"
+info "done."
+info "usage:  claude / codex  -> run directly (storage is already wired up)"
+info "        opencode        -> use 'oc' (the wrapper), NOT bare 'opencode'"
+info "commit the synced dirs to share across machines:"
+info "  git add .claude .opencode .codex .agent-sync && git commit -m 'agent-sync: sync agent data'"
 info "  (keep this repo PRIVATE while developing — transcripts may contain secrets)"

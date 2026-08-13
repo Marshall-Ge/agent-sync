@@ -47,7 +47,7 @@ cd <your-repo>
 ## How it works
 
 - **Claude Code** stores sessions (and auto-memory) in `~/.claude/projects/<encoded-path>/`. `setup.sh` symlinks that directory to `.claude/sessions/`, so transcripts are written straight into the repo.
-- **opencode** keeps sessions in a global sqlite DB that can't be symlinked per-project. `setup.sh` installs an `oc` alias that launches opencode and, on exit, exports this project's sessions to `.opencode/sessions/` and stages them in git.
+- **opencode** keeps sessions in a global sqlite DB that can't be symlinked per-project. `setup.sh` installs a cwd-aware `oc` wrapper (finds the nearest project via the `.agent-sync` marker) that launches opencode and, on exit, exports this project's sessions to `.opencode/sessions/` and stages them in git. Use `oc`, not bare `opencode`.
 - **Codex CLI** keeps sessions globally under `~/.codex/sessions/` (not per-project). `setup.sh` filters them by the `cwd` in each rollout and copies only this project's sessions into `.codex/sessions/`. Global `memories` and `skills` are snapshotted (add-only, both directions) so multiple projects don't fight over `~/.codex`.
 
 ## Commands
