@@ -2,7 +2,7 @@
 # agent-sync — single-file cross-machine sync for coding agents.
 #
 # Syncs memory / sessions / skills across machines for three agents:
-#   claude   (Claude Code)  sessions + auto-memory -> symlink into .claude/sessions/
+#   claude   (Claude Code)  sessions + auto-memory -> snapshot into .claude/sessions/
 #   opencode (opencode)     sessions -> export/import into .opencode/sessions/ + `oc` alias
 #   codex    (Codex CLI)    sessions -> copy filtered by cwd; memories/skills -> snapshot
 #
@@ -10,7 +10,7 @@
 #   ./setup.sh                              show this help (no args -> help)
 #   ./setup.sh claude [opencode] [codex]    init any combination of tools
 #   ./setup.sh all                          init all three
-#   ./setup.sh sync                         collect latest codex data (run BEFORE git commit+push)
+#   ./setup.sh sync                         collect latest agent data (run BEFORE git commit+push)
 #   ./setup.sh oc                           wrapper: launch opencode, then export sessions to git
 #   ./setup.sh --help                       this help
 #
@@ -33,23 +33,22 @@ usage() {
 
 # --- helpers ----------------------------------------------------------------
 
-# Idempotent symlink: link path (in ~/.claude) -> real dir inside the project.
-ensure_symlink() {  # $1 = link path, $2 = real dir in project
-  local link="$1" real="$2"
-  mkdir -p "$real"
-  if [ -L "$link" ]; then
-    ok "symlink already present: $link"
-  elif [ -e "$link" ]; then
-    warn "real dir at $link; merging into $real"
-    cp -Rnp "$link/." "$real/" 2>/dev/null || true
-    rm -rf "$link"
-    ln -s "$real" "$link"
-    ok "merged + symlinked: $link -> $real"
-  else
-    mkdir -p "$(dirname "$link")"
-    ln -s "$real" "$link"
-    ok "symlinked: $link -> $real"
+# The encoded project path Claude Code uses as its per-project storage dir name.
+encoded() { printf '%s' "$PROJECT" | sed 's|[^A-Za-z0-9]|-|g'; }
+
+# Snapshot claude's NATIVE session dir into the project WITHOUT touching the
+# native storage (no symlink — `claude` keeps working exactly as before). Local
+# is authoritative: fresh machine (local empty) restores from the project,
+# otherwise the latest local sessions are copied into the project.
+sync_claude_sessions() {
+  local g="$HOME/.claude/projects/$(encoded)" p="$PROJECT/.claude/sessions"
+  mkdir -p "$g" "$p"
+  if [ -z "$(ls -A "$g" 2>/dev/null)" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ]; then
+    cp -Rnp "$p/." "$g/" 2>/dev/null || true
+    ok "restored claude sessions into $g"
   fi
+  cp -Rp "$g/." "$p/" 2>/dev/null || true
+  ok "claude sessions synced -> $p"
 }
 
 # Idempotent cwd-aware `oc` wrapper: finds the nearest agent-sync project from
@@ -111,12 +110,10 @@ sync_global_dir() {  # $1 = global dir, $2 = project dir
 
 init_claude() {
   info "claude (Claude Code)"
-  seed_dir "$PROJECT/.claude/sessions" "Claude Code session transcripts + auto-memory. Symlinked from ~/.claude/projects/<encoded>."
+  seed_dir "$PROJECT/.claude/sessions" "Claude Code session transcripts + auto-memory (snapshot from ~/.claude/projects/<encoded>)."
   seed_dir "$PROJECT/.claude/skills"   "Shared skills; auto-loaded by Claude Code, referenced by opencode via skills.paths."
   seed_dir "$PROJECT/.claude/memory"   "Long-lived project notes; git-tracked."
-  local encoded
-  encoded="$(printf '%s' "$PROJECT" | sed 's|[^A-Za-z0-9]|-|g')"
-  ensure_symlink "$HOME/.claude/projects/$encoded" "$PROJECT/.claude/sessions"
+  sync_claude_sessions
 }
 
 # --- opencode ---------------------------------------------------------------
@@ -208,15 +205,16 @@ sync_codex_sessions() {
 
 # --- sync -------------------------------------------------------------------
 
-# Collect the latest agent data before you commit + push. claude/opencode are
-# already live (symlink / export-on-exit); only codex needs re-scanning. No git
-# commands run here — commit + push manually afterwards.
+# Collect the latest agent data before you commit + push. Snapshots are
+# non-invasive copies of each tool's native storage. No git commands run here —
+# commit + push manually afterwards.
 sync_all() {
   info "sync (collect latest agent data)"
+  sync_claude_sessions
   sync_global_dir "$HOME/.codex/memories" "$PROJECT/.codex/memories"
   sync_global_dir "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
   sync_codex_sessions
-  info "claude / opencode already live — nothing to collect."
+  info "opencode sessions export on exit via 'oc' — nothing to collect here."
   echo
   info "now commit + push manually to sync across machines:"
   info "  git add .claude .opencode .codex && git commit -m 'sync agent data' && git push"
