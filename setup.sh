@@ -272,9 +272,10 @@ else
 fi
 
 echo
-info "done."
-info "usage:  claude / codex  -> run directly (storage is already wired up)"
-info "        opencode        -> use 'oc' (the wrapper), NOT bare 'opencode'"
-info "commit the synced dirs to share across machines:"
+info "done. 完成。"
+info "usage / 用法:"
+info "  claude / codex  -> 直接运行 (run directly)"
+info "  opencode        -> 用 'oc' 包装,不要裸跑 opencode (use 'oc', NOT bare 'opencode')"
+info "commit these dirs to share across machines / 提交以下目录实现跨机共享:"
 info "  git add .claude .opencode .codex .agent-sync && git commit -m 'agent-sync: sync agent data'"
-info "  (keep this repo PRIVATE while developing — transcripts may contain secrets)"
+info "  keep this repo PRIVATE while developing / 开发期请用私有仓库 — 转录可能含密钥"
