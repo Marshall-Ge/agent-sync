@@ -12,7 +12,7 @@
 |-------|----------|--------|--------|
 | Claude Code | `.claude/sessions/`(软链) | auto-memory(同一软链下) | `.claude/skills/` |
 | opencode | `.opencode/sessions/`(导入导出) | `.claude/memory/` | `.claude/skills/`(经 `opencode.json`) |
-| Codex CLI | `.codex/sessions/`(软链) | `.codex/memories/`(软链) | `.codex/skills/`(软链) |
+| Codex CLI | `.codex/sessions/`(复制,按 cwd 过滤) | `.codex/memories/`(软链) | `.codex/skills/`(软链,排除 `.system/`) |
 
 ## 快速开始
 
@@ -48,7 +48,7 @@ cd <你的仓库>
 
 - **Claude Code** 把会话(和 auto-memory)存在 `~/.claude/projects/<编码路径>/`。`setup.sh` 把该目录软链到 `.claude/sessions/`,转录内容直接写进仓库。
 - **opencode** 的会话存在全局 sqlite 里,无法按项目软链。`setup.sh` 装一个 `oc` 别名:启动 opencode,退出时把本项目会话导出到 `.opencode/sessions/` 并 git add。
-- **Codex CLI** 的状态在 `~/.codex/` 下。`setup.sh` 把 `sessions`、`memories`、`skills` 软链进 `.codex/`。
+- **Codex CLI** 的状态在 `~/.codex/` 下。会话是全局按日期存的(不按项目分),所以 `setup.sh` 按每个 rollout 里记录的 `cwd` 过滤,只把本项目的会话**复制**进 `.codex/sessions/`;`memories` 和 `skills` 走软链(`skills` 排除自带的 `.system/`)。
 
 ## 命令
 
@@ -63,7 +63,7 @@ cd <你的仓库>
 
 ## 注意事项
 
-- **codex 状态是全局的**(`~/.codex/` 不按项目分)。codex 这一步只在一个「主项目」里跑,否则多项目会话会互相混。
+- **codex 会话按项目过滤**(按每个 rollout 里的 `cwd`),但 `memories` 天然是全局的(单一长期记忆)。新的 codex 会话需要重跑 `./setup.sh codex` 才会被收录。
 - **会话可能含密钥。** 转录会记录你输入的一切——包括 API key。绝不要把 key 粘进对话,把它们放在环境变量 / `~/.claude/settings.json` 里。`setup.sh` 不写、不存任何 key。
 - `oc` 别名只往 `~/.zshrc` 写一行 alias(不写 key),运行 `source ~/.zshrc` 生效。
 - 幂等,可重复运行。

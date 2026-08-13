@@ -10,7 +10,7 @@ Copy the single `setup.sh` into your project, run it once, and your agents' stat
 |-------|----------|--------|--------|
 | Claude Code | `.claude/sessions/` (symlink) | auto-memory (under the same symlink) | `.claude/skills/` |
 | opencode | `.opencode/sessions/` (export/import) | `.claude/memory/` | `.claude/skills/` (via `opencode.json`) |
-| Codex CLI | `.codex/sessions/` (symlink) | `.codex/memories/` (symlink) | `.codex/skills/` (symlink) |
+| Codex CLI | `.codex/sessions/` (copy, filtered by cwd) | `.codex/memories/` (symlink) | `.codex/skills/` (symlink, `.system/` excluded) |
 
 ## Quick start
 
@@ -46,7 +46,7 @@ cd <your-repo>
 
 - **Claude Code** stores sessions (and auto-memory) in `~/.claude/projects/<encoded-path>/`. `setup.sh` symlinks that directory to `.claude/sessions/`, so transcripts are written straight into the repo.
 - **opencode** keeps sessions in a global sqlite DB that can't be symlinked per-project. `setup.sh` installs an `oc` alias that launches opencode and, on exit, exports this project's sessions to `.opencode/sessions/` and stages them in git.
-- **Codex CLI** keeps state under `~/.codex/`. `setup.sh` symlinks `sessions`, `memories`, and `skills` into `.codex/`.
+- **Codex CLI** keeps state under `~/.codex/`. Sessions are stored globally (not per-project), so `setup.sh` filters them by the `cwd` recorded in each rollout and copies only this project's sessions into `.codex/sessions/`; it symlinks `memories` and `skills` (excluding the bundled `.system/` skills).
 
 ## Commands
 
@@ -61,7 +61,7 @@ cd <your-repo>
 
 ## Caveats
 
-- **Codex state is global** (`~/.codex/` is not per-project). Run the codex step in one *primary* project only, otherwise sessions from multiple projects will mix.
+- **Codex sessions are filtered per-project** (by the `cwd` in each rollout), but `memories` are global by design (a single long-term memory). New codex sessions are only picked up when you re-run `./setup.sh codex`.
 - **Sessions may contain secrets.** Transcripts record everything typed — including API keys. Never paste keys into chat; keep them in env vars / `~/.claude/settings.json`. `setup.sh` never writes or stores keys.
 - The `oc` alias writes only an alias line to `~/.zshrc` (never a key). Run `source ~/.zshrc` to activate it.
 - Idempotent: safe to re-run.

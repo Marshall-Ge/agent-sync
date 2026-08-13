@@ -118,13 +118,61 @@ init_opencode() {
 
 init_codex() {
   info "codex (Codex CLI)"
-  seed_dir "$PROJECT/.codex/sessions"  "Codex CLI rollout transcripts. Symlinked from ~/.codex/sessions."
-  seed_dir "$PROJECT/.codex/memories"  "Codex CLI long-term memory. Symlinked from ~/.codex/memories."
-  seed_dir "$PROJECT/.codex/skills"    "Codex CLI skills. Symlinked from ~/.codex/skills."
-  warn "codex state under ~/.codex is GLOBAL (not per-project); run this in one primary project"
-  ensure_symlink "$HOME/.codex/sessions" "$PROJECT/.codex/sessions"
+  seed_dir "$PROJECT/.codex/sessions"  "Codex CLI sessions for THIS project only (filtered by cwd)."
+  seed_dir "$PROJECT/.codex/memories"  "Codex CLI long-term memory (global by design). Symlinked from ~/.codex/memories."
+  seed_dir "$PROJECT/.codex/skills"    "Codex CLI skills (user skills; bundled .system/ is gitignored)."
+
+  # memories are a single global long-term memory — share them across machines.
   ensure_symlink "$HOME/.codex/memories" "$PROJECT/.codex/memories"
-  ensure_symlink "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
+
+  # skills: share the whole dir, but never commit the CLI-bundled .system/ skills.
+  ensure_symlink "$HOME/.codex/skills" "$PROJECT/.codex/skills"
+  if [ ! -f "$PROJECT/.codex/skills/.gitignore" ]; then
+    printf '.system/\n' > "$PROJECT/.codex/skills/.gitignore"
+    ok "gitignored .codex/skills/.system/"
+  fi
+
+  # sessions: codex stores them globally (not per-project), so filter by cwd
+  # and COPY only this project's rollouts into the repo.
+  sync_codex_sessions
+}
+
+# Print the cwd recorded in a rollout's session_meta line (empty if none).
+codex_rollout_cwd() {  # $1 = rollout jsonl path
+  python3 - "$1" <<'PYEOF'
+import json, sys
+cwd = ""
+for line in open(sys.argv[1], errors="replace"):
+    if '"session_meta"' not in line:
+        continue
+    try:
+        d = json.loads(line)
+    except Exception:
+        continue
+    if d.get("type") == "session_meta":
+        cwd = d.get("payload", {}).get("cwd") or ""
+        break
+print(cwd)
+PYEOF
+}
+
+sync_codex_sessions() {
+  local src="$HOME/.codex/sessions" dst="$PROJECT/.codex/sessions" n=0 cwd name
+  if [ ! -d "$src" ] || [ -L "$src" ]; then
+    warn "~/.codex/sessions missing or is a symlink (left by an old agent-sync); restore it, then re-run"
+    return 0
+  fi
+  while IFS= read -r f; do
+    cwd="$(codex_rollout_cwd "$f")"
+    if [ -n "$cwd" ] && { [ "$cwd" = "$PROJECT" ] || [[ "$cwd" == "$PROJECT/"* ]]; }; then
+      name="$(basename "$f")"
+      if [ ! -e "$dst/$name" ]; then
+        cp -p "$f" "$dst/$name"
+        n=$((n+1))
+      fi
+    fi
+  done < <(find -L "$src" -name 'rollout-*.jsonl' 2>/dev/null)
+  ok "copied $n codex session(s) for this project (re-run to pick up new ones)"
 }
 
 # --- oc launcher ------------------------------------------------------------
