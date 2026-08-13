@@ -7,13 +7,12 @@
 #   codex    (Codex CLI)    sessions -> copy filtered by cwd; memories/skills -> snapshot
 #
 # Usage (copy this file into your project root, then run):
-#   ./setup.sh                  init all three
-#   ./setup.sh claude           init claude only
-#   ./setup.sh opencode         init opencode only
-#   ./setup.sh codex            init codex only
-#   ./setup.sh sync             collect latest codex data (run BEFORE git commit+push)
-#   ./setup.sh oc               wrapper: launch opencode, then export sessions to git
-#   ./setup.sh --help           this help
+#   ./setup.sh                              show this help (no args -> help)
+#   ./setup.sh claude [opencode] [codex]    init any combination of tools
+#   ./setup.sh all                          init all three
+#   ./setup.sh sync                         collect latest codex data (run BEFORE git commit+push)
+#   ./setup.sh oc                           wrapper: launch opencode, then export sessions to git
+#   ./setup.sh --help                       this help
 #
 # Idempotent: safe to re-run. Never writes API keys.
 #
@@ -269,26 +268,25 @@ run_oc() {
 
 # --- dispatch ---------------------------------------------------------------
 
+if [ $# -eq 0 ]; then
+  usage; exit 0
+fi
+
 case "${1:-}" in
   --help|-h|help) usage; exit 0 ;;
   oc) shift; run_oc "$@"; exit 0 ;;
   sync) sync_all; exit 0 ;;
 esac
 
-if [ $# -eq 0 ]; then
-  init_claude
-  init_opencode
-  init_codex
-else
-  for a in "$@"; do
-    case "$a" in
-      claude)   init_claude ;;
-      opencode) init_opencode ;;
-      codex)    init_codex ;;
-      *) warn "unknown tool: $a"; usage; exit 1 ;;
-    esac
-  done
-fi
+for a in "$@"; do
+  case "$a" in
+    claude)   init_claude ;;
+    opencode) init_opencode ;;
+    codex)    init_codex ;;
+    all)      init_claude; init_opencode; init_codex ;;
+    *) warn "unknown tool: $a"; usage; exit 1 ;;
+  esac
+done
 
 echo
 info "done. 完成。"

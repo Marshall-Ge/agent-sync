@@ -23,10 +23,10 @@
 cp /path/to/agent-sync/setup.sh ./setup.sh
 chmod +x setup.sh
 
-# 运行(无参数 = 三个 agent 全量)
-./setup.sh
+# 初始化全部三个
+./setup.sh all
 
-# 或指定子集
+# 或任意组合
 ./setup.sh claude
 ./setup.sh opencode codex
 ```
@@ -57,13 +57,12 @@ cd <你的仓库>
 ## 命令
 
 ```bash
-./setup.sh              # 初始化全部三个
-./setup.sh claude       # 只 claude
-./setup.sh opencode     # 只 opencode
-./setup.sh codex        # 只 codex
-./setup.sh sync         # 收集最新 codex 数据(跨机前先跑,再 git commit+push)
-./setup.sh oc           # 启动 opencode，退出导出会话
-./setup.sh --help       # 帮助
+./setup.sh                    # 显示帮助(无参数)
+./setup.sh claude opencode    # 初始化任意组合
+./setup.sh all                # 初始化全部三个
+./setup.sh sync               # 收集最新 codex 数据(跨机前先跑,再 git commit+push)
+./setup.sh oc                 # 启动 opencode，退出导出会话
+./setup.sh --help             # 帮助
 ```
 
 ## 注意事项

@@ -21,10 +21,10 @@ Copy the single `setup.sh` into your project, run it once, and your agents' stat
 cp /path/to/agent-sync/setup.sh ./setup.sh
 chmod +x setup.sh
 
-# run it (no args = all three agents)
-./setup.sh
+# init all three
+./setup.sh all
 
-# or pick a subset
+# or any combination
 ./setup.sh claude
 ./setup.sh opencode codex
 ```
@@ -55,13 +55,12 @@ cd <your-repo>
 ## Commands
 
 ```bash
-./setup.sh              # init all three
-./setup.sh claude       # claude only
-./setup.sh opencode     # opencode only
-./setup.sh codex        # codex only
-./setup.sh sync         # collect latest codex data (run before commit+push)
-./setup.sh oc           # launch opencode, export sessions on exit
-./setup.sh --help       # help
+./setup.sh                    # show help (no args)
+./setup.sh claude opencode    # init any combination
+./setup.sh all                # init all three
+./setup.sh sync               # collect latest codex data (run before commit+push)
+./setup.sh oc                 # launch opencode, export sessions on exit
+./setup.sh --help             # help
 ```
 
 ## Caveats
