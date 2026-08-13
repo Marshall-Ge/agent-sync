@@ -11,7 +11,8 @@
 #   ./setup.sh claude           init claude only
 #   ./setup.sh opencode         init opencode only
 #   ./setup.sh codex            init codex only
-#   ./setup.sh oc               alias target: launch opencode, then export sessions to git
+#   ./setup.sh sync             collect latest codex data (run BEFORE git commit+push)
+#   ./setup.sh oc               wrapper: launch opencode, then export sessions to git
 #   ./setup.sh --help           this help
 #
 # Idempotent: safe to re-run. Never writes API keys.
@@ -192,6 +193,7 @@ sync_codex_sessions() {
     warn "~/.codex/sessions missing or is a symlink (left by an old agent-sync); restore it, then re-run"
     return 0
   fi
+  mkdir -p "$dst"
   while IFS= read -r f; do
     cwd="$(codex_rollout_cwd "$f")"
     if [ -n "$cwd" ] && { [ "$cwd" = "$PROJECT" ] || [[ "$cwd" == "$PROJECT/"* ]]; }; then
@@ -203,6 +205,22 @@ sync_codex_sessions() {
     fi
   done < <(find -L "$src" -name 'rollout-*.jsonl' 2>/dev/null)
   ok "copied $n codex session(s) for this project (re-run to pick up new ones)"
+}
+
+# --- sync -------------------------------------------------------------------
+
+# Collect the latest agent data before you commit + push. claude/opencode are
+# already live (symlink / export-on-exit); only codex needs re-scanning. No git
+# commands run here — commit + push manually afterwards.
+sync_all() {
+  info "sync (collect latest agent data)"
+  sync_global_dir "$HOME/.codex/memories" "$PROJECT/.codex/memories"
+  sync_global_dir "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
+  sync_codex_sessions
+  info "claude / opencode already live — nothing to collect."
+  echo
+  info "now commit + push manually to sync across machines:"
+  info "  git add .claude .opencode .codex && git commit -m 'sync agent data' && git push"
 }
 
 # --- oc launcher ------------------------------------------------------------
@@ -254,6 +272,7 @@ run_oc() {
 case "${1:-}" in
   --help|-h|help) usage; exit 0 ;;
   oc) shift; run_oc "$@"; exit 0 ;;
+  sync) sync_all; exit 0 ;;
 esac
 
 if [ $# -eq 0 ]; then

@@ -31,11 +31,13 @@ chmod +x setup.sh
 ./setup.sh opencode codex
 ```
 
-然后把生成的目录提交进 git，实现共享：
+跨机前先刷新快照，再 commit + push：
 
 ```bash
+./setup.sh sync                         # 收集最新的 codex 数据
 git add .claude .opencode .codex
 git commit -m "agent-sync: sync agent data"
+git push
 ```
 
 在新机器上：
@@ -59,6 +61,7 @@ cd <你的仓库>
 ./setup.sh claude       # 只 claude
 ./setup.sh opencode     # 只 opencode
 ./setup.sh codex        # 只 codex
+./setup.sh sync         # 收集最新 codex 数据(跨机前先跑,再 git commit+push)
 ./setup.sh oc           # 启动 opencode，退出导出会话
 ./setup.sh --help       # 帮助
 ```

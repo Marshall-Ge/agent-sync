@@ -29,11 +29,13 @@ chmod +x setup.sh
 ./setup.sh opencode codex
 ```
 
-Then commit the generated directories so they're shared:
+Before switching machines, refresh the snapshots then commit + push:
 
 ```bash
+./setup.sh sync                         # collect the latest codex data
 git add .claude .opencode .codex
 git commit -m "agent-sync: sync agent data"
+git push
 ```
 
 On a new machine:
@@ -57,6 +59,7 @@ cd <your-repo>
 ./setup.sh claude       # claude only
 ./setup.sh opencode     # opencode only
 ./setup.sh codex        # codex only
+./setup.sh sync         # collect latest codex data (run before commit+push)
 ./setup.sh oc           # launch opencode, export sessions on exit
 ./setup.sh --help       # help
 ```
