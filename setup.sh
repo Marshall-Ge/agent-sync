@@ -22,6 +22,7 @@
 set -euo pipefail
 
 PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+chmod +x "$0" 2>/dev/null || true
 
 info() { printf '==> %s\n' "$*"; }
 ok()   { printf '    [ok] %s\n' "$*"; }
@@ -62,14 +63,16 @@ import re, sys
 path = sys.argv[1]
 s = open(path).read()
 s = re.sub(r'^alias oc=.*\n', '', s, flags=re.M)
+s = re.sub(r'^# agent-sync: oc alias\n', '', s, flags=re.M)
 s = re.sub(r'^# >>> agent-sync: oc >>>\n.*?^# <<< agent-sync: oc <<<\n', '', s, flags=re.M | re.S)
 block = (
     '# >>> agent-sync: oc >>>\n'
+    'unalias oc 2>/dev/null || true\n'
     'oc() {\n'
     '  local p="$PWD"\n'
     '  while [ "$p" != "/" ]; do\n'
     '    if [ -f "$p/.agent-sync" ]; then\n'
-    '      "$p/setup.sh" oc "$@"; return $?\n'
+    '      bash "$p/setup.sh" oc "$@"; return $?\n'
     '    fi\n'
     '    p="$(dirname "$p")"\n'
     '  done\n'
