@@ -19,7 +19,7 @@
 #
 # PRIVACY: session transcripts record everything you type (including API keys).
 # Use a PRIVATE repo for this project while developing; don't push the synced
-# .claude/sessions, .opencode/sessions or .codex/sessions to a public repo.
+# .claude/sessions, .opencode/sessions, .codex/sessions or .dsh/sessions to a public repo.
 set -euo pipefail
 
 PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -100,13 +100,17 @@ seed_dir() {  # $1 = dir, $2 = description
   fi
 }
 
-# Bidirectional add-only snapshot of a GLOBAL dir into the project (no symlink,
-# so multiple projects don't fight over ~/.codex/...).
-sync_global_dir() {  # $1 = global dir, $2 = project dir
+# Snapshot a global/native dir into the project (no symlink). Local is
+# authoritative: restore from the project when the native dir is empty (fresh
+# machine), otherwise copy the latest native state into the project.
+sync_global_dir() {  # $1 = native/global dir, $2 = project dir
   local g="$1" p="$2"
   mkdir -p "$g" "$p"
-  cp -Rnp "$g/." "$p/" 2>/dev/null || true   # global -> project (add missing)
-  cp -Rnp "$p/." "$g/" 2>/dev/null || true   # project -> global (restore on new machine)
+  if [ -z "$(ls -A "$g" 2>/dev/null)" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ]; then
+    cp -Rnp "$p/." "$g/" 2>/dev/null || true
+    ok "restored into $g"
+  fi
+  cp -Rp "$g/." "$p/" 2>/dev/null || true
   ok "snapshot synced: $p"
 }
 
@@ -285,9 +289,9 @@ run_oc() {
 
   case "${1:-}" in
     run|serve|web|attach|export|import|models|session|agent|db|plugin|mcp|acp|stats|github|pr|upgrade|uninstall|completion|debug|providers|auth)
-      opencode "$@" ;;
+      opencode "$@" || true ;;
     *)
-      opencode --auto "$@" ;;
+      opencode --auto "$@" || true ;;
   esac
 
   local db="$HOME/.local/share/opencode/opencode.db" sess_dir="$PROJECT/.opencode/sessions" count=0 id
@@ -343,6 +347,6 @@ done
 echo
 info "done. 完成。"
 info "usage / 用法:"
-info "  claude / codex  -> 直接运行 (run directly)"
+info "  claude / codex / dsh  -> 直接运行 (run directly)"
 info "  opencode        -> 用 'oc' 运行,不要跑 opencode，需要做一层包装 (use 'oc', NOT bare 'opencode')"
 info "  keep this repo PRIVATE while developing / 开发期请用私有仓库 — 待开发完成后删除跨级共享session"
