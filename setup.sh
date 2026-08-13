@@ -38,19 +38,16 @@ usage() {
 # The encoded project path Claude Code uses as its per-project storage dir name.
 encoded() { printf '%s' "$PROJECT" | sed 's|[^A-Za-z0-9]|-|g'; }
 
-# Snapshot claude's NATIVE session dir into the project WITHOUT touching the
-# native storage (no symlink — `claude` keeps working exactly as before). Local
-# is authoritative: fresh machine (local empty) restores from the project,
-# otherwise the latest local sessions are copied into the project.
-sync_claude_sessions() {
-  local g="$HOME/.claude/projects/$(encoded)" p="$PROJECT/.claude/sessions"
+# Snapshot a tool's native/global dir into the project (no symlink — the tool
+# keeps working exactly as before). Merges both ways: add sessions from other
+# machines (project -> native, add-only), then capture the latest local state
+# (native -> project, overwrite).
+snapshot_dir() {  # $1 = native/global dir, $2 = project dir
+  local g="$1" p="$2"
   mkdir -p "$g" "$p"
-  if [ -z "$(ls -A "$g" 2>/dev/null)" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ]; then
-    cp -Rnp "$p/." "$g/" 2>/dev/null || true
-    ok "restored claude sessions into $g"
-  fi
+  cp -Rnp "$p/." "$g/" 2>/dev/null || true
   cp -Rp "$g/." "$p/" 2>/dev/null || true
-  ok "claude sessions synced -> $p"
+  ok "snapshot synced: $p"
 }
 
 # Idempotent cwd-aware `oc` wrapper: finds the nearest agent-sync project from
@@ -100,20 +97,6 @@ seed_dir() {  # $1 = dir, $2 = description
   fi
 }
 
-# Snapshot a global/native dir into the project (no symlink). Local is
-# authoritative: restore from the project when the native dir is empty (fresh
-# machine), otherwise copy the latest native state into the project.
-sync_global_dir() {  # $1 = native/global dir, $2 = project dir
-  local g="$1" p="$2"
-  mkdir -p "$g" "$p"
-  if [ -z "$(ls -A "$g" 2>/dev/null)" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ]; then
-    cp -Rnp "$p/." "$g/" 2>/dev/null || true
-    ok "restored into $g"
-  fi
-  cp -Rp "$g/." "$p/" 2>/dev/null || true
-  ok "snapshot synced: $p"
-}
-
 # --- claude -----------------------------------------------------------------
 
 init_claude() {
@@ -121,7 +104,7 @@ init_claude() {
   seed_dir "$PROJECT/.claude/sessions" "Claude Code session transcripts + auto-memory (snapshot from ~/.claude/projects/<encoded>)."
   seed_dir "$PROJECT/.claude/skills"   "Shared skills; auto-loaded by Claude Code, referenced by opencode via skills.paths."
   seed_dir "$PROJECT/.claude/memory"   "Long-lived project notes; git-tracked."
-  sync_claude_sessions
+  snapshot_dir "$HOME/.claude/projects/$(encoded)" "$PROJECT/.claude/sessions"
 }
 
 # --- opencode ---------------------------------------------------------------
@@ -160,8 +143,8 @@ init_codex() {
   seed_dir "$PROJECT/.codex/skills"    "Snapshot of global ~/.codex/skills (bundled .system/ gitignored)."
 
   # memories + skills are global per-user; snapshot them (no symlink, no competition).
-  sync_global_dir "$HOME/.codex/memories" "$PROJECT/.codex/memories"
-  sync_global_dir "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
+  snapshot_dir "$HOME/.codex/memories" "$PROJECT/.codex/memories"
+  snapshot_dir "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
   if [ ! -f "$PROJECT/.codex/skills/.gitignore" ]; then
     printf '.system/\n' > "$PROJECT/.codex/skills/.gitignore"
     ok "gitignored .codex/skills/.system/"
@@ -237,26 +220,10 @@ print("--" + key[:251] + "--")
 PYEOF
 }
 
-# Snapshot dsh's NATIVE session dir into the project (no symlink — dsh keeps
-# working normally). Local is authoritative; fresh machine restores from project.
-sync_dsh_sessions() {
-  local key g p
-  key="$(dsh_project_key)"
-  g="$HOME/.dsh/sessions/$key"
-  p="$PROJECT/.dsh/sessions"
-  mkdir -p "$g" "$p"
-  if [ -z "$(ls -A "$g" 2>/dev/null)" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ]; then
-    cp -Rnp "$p/." "$g/" 2>/dev/null || true
-    ok "restored dsh sessions into $g"
-  fi
-  cp -Rp "$g/." "$p/" 2>/dev/null || true
-  ok "dsh sessions synced -> $p"
-}
-
 init_dsh() {
   info "dsh (DeepSeek Harness)"
   seed_dir "$PROJECT/.dsh/sessions" "dsh session transcripts (snapshot from ~/.dsh/sessions/<projectKey>)."
-  sync_dsh_sessions
+  snapshot_dir "$HOME/.dsh/sessions/$(dsh_project_key)" "$PROJECT/.dsh/sessions"
 }
 
 # --- sync -------------------------------------------------------------------
@@ -266,10 +233,10 @@ init_dsh() {
 # commit + push manually afterwards.
 sync_all() {
   info "sync (collect latest agent data)"
-  sync_claude_sessions
-  sync_dsh_sessions
-  sync_global_dir "$HOME/.codex/memories" "$PROJECT/.codex/memories"
-  sync_global_dir "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
+  snapshot_dir "$HOME/.claude/projects/$(encoded)" "$PROJECT/.claude/sessions"
+  snapshot_dir "$HOME/.dsh/sessions/$(dsh_project_key)" "$PROJECT/.dsh/sessions"
+  snapshot_dir "$HOME/.codex/memories" "$PROJECT/.codex/memories"
+  snapshot_dir "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
   sync_codex_sessions
   info "opencode sessions export on exit via 'oc' — nothing to collect here."
   echo
