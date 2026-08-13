@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # agent-sync — single-file cross-machine sync for coding agents.
 #
-# Syncs memory / sessions / skills across machines for three agents:
-#   claude   (Claude Code)  sessions + auto-memory -> snapshot into .claude/sessions/
-#   opencode (opencode)     sessions -> export/import into .opencode/sessions/ + `oc` alias
-#   codex    (Codex CLI)    sessions -> copy filtered by cwd; memories/skills -> snapshot
+# Syncs memory / sessions / skills across machines for coding agents:
+#   claude   (Claude Code)        sessions + auto-memory -> snapshot into .claude/sessions/
+#   opencode (opencode)           sessions -> export/import into .opencode/sessions/ + `oc` wrapper
+#   codex    (Codex CLI)          sessions -> copy filtered by cwd; memories/skills -> snapshot
+#   dsh      (DeepSeek Harness)   sessions -> snapshot into .dsh/sessions/
 #
 # Usage (copy this file into your project root, then run):
 #   ./setup.sh                              show this help (no args -> help)
-#   ./setup.sh claude [opencode] [codex]    init any combination of tools
-#   ./setup.sh all                          init all three
+#   ./setup.sh claude [opencode] [codex] [dsh]  init any combination of tools
+#   ./setup.sh all                          init all four
 #   ./setup.sh sync                         collect latest agent data (run BEFORE git commit+push)
 #   ./setup.sh oc                           wrapper: launch opencode, then export sessions to git
 #   ./setup.sh --help                       this help
@@ -206,6 +207,54 @@ sync_codex_sessions() {
   ok "copied $n codex session(s) for this project (re-run to pick up new ones)"
 }
 
+# --- dsh (DeepSeek Harness) -------------------------------------------------
+
+# Encode a project path into dsh's per-project session directory key
+# (mirrors projectKey() in dsh-session-persistence-jsonl).
+dsh_project_key() {
+  python3 - "$PROJECT" <<'PYEOF'
+import sys
+cwd = sys.argv[1]
+readable = ""
+separator_run = False
+for ch in cwd:
+    if ch in "/\\:":
+        if not separator_run:
+            readable += "-"
+        separator_run = True
+    elif ch != "~" and (("a" <= ch <= "z") or ("A" <= ch <= "Z") or ("0" <= ch <= "9") or ch in "._-"):
+        readable += ch
+        separator_run = False
+    else:
+        readable += "~" + format(ord(ch), "04X")
+        separator_run = False
+key = readable.lstrip("-") or "root"
+print("--" + key[:251] + "--")
+PYEOF
+}
+
+# Snapshot dsh's NATIVE session dir into the project (no symlink — dsh keeps
+# working normally). Local is authoritative; fresh machine restores from project.
+sync_dsh_sessions() {
+  local key g p
+  key="$(dsh_project_key)"
+  g="$HOME/.dsh/sessions/$key"
+  p="$PROJECT/.dsh/sessions"
+  mkdir -p "$g" "$p"
+  if [ -z "$(ls -A "$g" 2>/dev/null)" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ]; then
+    cp -Rnp "$p/." "$g/" 2>/dev/null || true
+    ok "restored dsh sessions into $g"
+  fi
+  cp -Rp "$g/." "$p/" 2>/dev/null || true
+  ok "dsh sessions synced -> $p"
+}
+
+init_dsh() {
+  info "dsh (DeepSeek Harness)"
+  seed_dir "$PROJECT/.dsh/sessions" "dsh session transcripts (snapshot from ~/.dsh/sessions/<projectKey>)."
+  sync_dsh_sessions
+}
+
 # --- sync -------------------------------------------------------------------
 
 # Collect the latest agent data before you commit + push. Snapshots are
@@ -214,13 +263,14 @@ sync_codex_sessions() {
 sync_all() {
   info "sync (collect latest agent data)"
   sync_claude_sessions
+  sync_dsh_sessions
   sync_global_dir "$HOME/.codex/memories" "$PROJECT/.codex/memories"
   sync_global_dir "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
   sync_codex_sessions
   info "opencode sessions export on exit via 'oc' — nothing to collect here."
   echo
   info "now commit + push manually to sync across machines:"
-  info "  git add .claude .opencode .codex && git commit -m 'sync agent data' && git push"
+  info "  git add .claude .opencode .codex .dsh && git commit -m 'sync agent data' && git push"
 }
 
 # --- oc launcher ------------------------------------------------------------
@@ -284,7 +334,8 @@ for a in "$@"; do
     claude)   init_claude ;;
     opencode) init_opencode ;;
     codex)    init_codex ;;
-    all)      init_claude; init_opencode; init_codex ;;
+    dsh)      init_dsh ;;
+    all)      init_claude; init_opencode; init_codex; init_dsh ;;
     *) warn "unknown tool: $a"; usage; exit 1 ;;
   esac
 done
