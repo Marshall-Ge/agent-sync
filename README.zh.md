@@ -4,51 +4,51 @@
 
 单文件跨机同步工具 —— 让 [Claude Code](https://claude.com/claude-code)、[opencode](https://opencode.ai)、[Codex CLI](https://github.com/openai/codex) 的 **memory / sessions / skills** 在多台机器间保持一致。
 
-把单个 `setup.sh` 拷进你的项目,运行一次,这些 agent 的状态就存进仓库(git 跟踪),跟着 `git clone` 到处走。
+会话和 memory 可能含密钥，所以它们只存在于**一个私有 vault 仓库**(`~/.agent-vault`)，不进你的项目仓库。各 agent 的真实存储位置软链进 vault；项目里只留非敏感的 skills 和 project memory。
 
-## 同步什么
+## 原理
 
-| Agent | Sessions | Memory | Skills |
-|-------|----------|--------|--------|
-| Claude Code | `.claude/sessions/`(软链) | auto-memory(同一软链下) | `.claude/skills/` |
-| opencode | `.opencode/sessions/`(导入导出) | `.claude/memory/` | `.claude/skills/`(经 `opencode.json`) |
-| Codex CLI | `.codex/sessions/`(复制,按 cwd 过滤) | `.codex/memories/`(软链) | `.codex/skills/`(软链,排除 `.system/`) |
+```
+~/.agent-vault/                          # 私有 git 仓库
+├── claude/<编码路径>/                    # 每个项目的 Claude session + auto-memory
+├── codex/{sessions,memories,skills}/    # 全局 codex 状态
+└── opencode/<编码路径>/                  # 每个项目导出的 opencode session
+```
+
+```
+~/.claude/projects/<编码>  ->  ~/.agent-vault/claude/<编码>/
+~/.codex/sessions          ->  ~/.agent-vault/codex/sessions/
+~/.codex/memories          ->  ~/.agent-vault/codex/memories/
+~/.codex/skills            ->  ~/.agent-vault/codex/skills/
+```
 
 ## 快速开始
 
 ```bash
-# 把 setup.sh 拷进项目根目录
+# 1. 让 vault 成为私有仓库(一次性)
+mkdir -p ~/.agent-vault && git -C ~/.agent-vault init
+#   ... 建一个【私有】GitHub 仓库并 add remote ...
+
+# 2. 把 setup.sh 拷进项目根目录并运行
 cp /path/to/agent-sync/setup.sh ./setup.sh
-chmod +x setup.sh
-
-# 运行(无参数 = 三个 agent 全量)
-./setup.sh
-
-# 或指定子集
-./setup.sh claude
-./setup.sh opencode codex
+./setup.sh              # 或 ./setup.sh claude / opencode / codex
 ```
 
-然后把生成的目录提交进 git,实现共享:
+新机器上:
 
 ```bash
-git add .claude .opencode .codex
-git commit -m "agent-sync: init sync dirs"
+git clone <私有vault地址> ~/.agent-vault   # vault
+git clone <项目地址> ...                    # 项目
+cd <项目> && ./setup.sh                     # 重建软链
 ```
 
-在新机器上只需:
+## 谁在哪
 
-```bash
-git clone <你的仓库>
-cd <你的仓库>
-./setup.sh          # 重新建立软链 / 导入会话
-```
-
-## 原理
-
-- **Claude Code** 把会话(和 auto-memory)存在 `~/.claude/projects/<编码路径>/`。`setup.sh` 把该目录软链到 `.claude/sessions/`,转录内容直接写进仓库。
-- **opencode** 的会话存在全局 sqlite 里,无法按项目软链。`setup.sh` 装一个 `oc` 别名:启动 opencode,退出时把本项目会话导出到 `.opencode/sessions/` 并 git add。
-- **Codex CLI** 的状态在 `~/.codex/` 下。会话是全局按日期存的(不按项目分),所以 `setup.sh` 按每个 rollout 里记录的 `cwd` 过滤,只把本项目的会话**复制**进 `.codex/sessions/`;`memories` 和 `skills` 走软链(`skills` 排除自带的 `.system/`)。
+| | 项目仓库(可公开) | vault(必须私有) |
+|---|---|---|
+| Claude | `.claude/skills/`、`.claude/memory/` | sessions + auto-memory |
+| opencode | — | 导出的 sessions |
+| Codex | — | sessions、memories、skills |
 
 ## 命令
 
@@ -57,17 +57,17 @@ cd <你的仓库>
 ./setup.sh claude       # 只 claude
 ./setup.sh opencode     # 只 opencode
 ./setup.sh codex        # 只 codex
-./setup.sh oc           #(别名目标)启动 opencode,退出时导出会话
+./setup.sh oc           # 启动 opencode，退出导出会话到 vault
 ./setup.sh --help       # 帮助
 ```
 
 ## 注意事项
 
-- **codex 会话按项目过滤**(按每个 rollout 里的 `cwd`),但 `memories` 天然是全局的(单一长期记忆)。新的 codex 会话需要重跑 `./setup.sh codex` 才会被收录。
-- **会话可能含密钥。** 转录会记录你输入的一切——包括 API key。绝不要把 key 粘进对话,把它们放在环境变量 / `~/.claude/settings.json` 里。`setup.sh` 不写、不存任何 key。
-- `oc` 别名只往 `~/.zshrc` 写一行 alias(不写 key),运行 `source ~/.zshrc` 生效。
-- 幂等,可重复运行。
+- **vault 必须私有。** 转录记录你输入的一切——包括 API key。绝不要把 `~/.agent-vault` 设成公开。
+- `oc` 别名只往 `~/.zshrc` 写一行 alias(不写 key)，`source ~/.zshrc` 生效。
+- 幂等，可重复运行。
+- 可用 `AGENT_VAULT` 环境变量覆盖 vault 路径。
 
 ## API key
 
-`setup.sh` 不管理 API key。opencode 的 `oc` 别名复用环境变量 `ANTHROPIC_AUTH_TOKEN`,回退读 `~/.claude/settings.json`。每台机器配置一次即可。
+`setup.sh` 不管理 API key。opencode 的 `oc` 别名复用 `ANTHROPIC_AUTH_TOKEN`，回退读 `~/.claude/settings.json`。每台机器配一次即可。

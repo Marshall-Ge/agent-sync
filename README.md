@@ -2,51 +2,51 @@
 
 Single-file cross-machine sync for coding agents — keep your **memory**, **sessions**, and **skills** in sync across machines for [Claude Code](https://claude.com/claude-code), [opencode](https://opencode.ai), and [Codex CLI](https://github.com/openai/codex).
 
-Copy the single `setup.sh` into your project, run it once, and your agents' state is stored inside the repo (git-tracked) so it follows you wherever you `git clone`.
+Sessions and memory can contain secrets, so they live in **one private vault repo** (`~/.agent-vault`), not in your project repos. Each agent's real storage location is symlinked into the vault; only non-sensitive skills and project memory stay in the project.
 
-## What it syncs
+## How it works
 
-| Agent | Sessions | Memory | Skills |
-|-------|----------|--------|--------|
-| Claude Code | `.claude/sessions/` (symlink) | auto-memory (under the same symlink) | `.claude/skills/` |
-| opencode | `.opencode/sessions/` (export/import) | `.claude/memory/` | `.claude/skills/` (via `opencode.json`) |
-| Codex CLI | `.codex/sessions/` (copy, filtered by cwd) | `.codex/memories/` (symlink) | `.codex/skills/` (symlink, `.system/` excluded) |
+```
+~/.agent-vault/                          # PRIVATE git repo
+├── claude/<encoded>/                    # per-project Claude sessions + auto-memory
+├── codex/{sessions,memories,skills}/    # global codex state
+└── opencode/<encoded>/                  # per-project opencode exports
+```
+
+```
+~/.claude/projects/<encoded>  ->  ~/.agent-vault/claude/<encoded>/
+~/.codex/sessions             ->  ~/.agent-vault/codex/sessions/
+~/.codex/memories             ->  ~/.agent-vault/codex/memories/
+~/.codex/skills               ->  ~/.agent-vault/codex/skills/
+```
 
 ## Quick start
 
 ```bash
-# copy setup.sh into your project root
+# 1. make the vault a private repo (one time)
+mkdir -p ~/.agent-vault && git -C ~/.agent-vault init
+#   ... create a PRIVATE GitHub repo and add it as remote ...
+
+# 2. copy setup.sh into your project root and run it
 cp /path/to/agent-sync/setup.sh ./setup.sh
-chmod +x setup.sh
-
-# run it (no args = all three agents)
-./setup.sh
-
-# or pick a subset
-./setup.sh claude
-./setup.sh opencode codex
+./setup.sh              # or: ./setup.sh claude / opencode / codex
 ```
 
-Then commit the generated directories so they're shared:
+On a new machine:
 
 ```bash
-git add .claude .opencode .codex
-git commit -m "agent-sync: init sync dirs"
+git clone <private-vault-url> ~/.agent-vault   # the vault
+git clone <your-project> ...                    # the project
+cd <your-project> && ./setup.sh                 # re-create the symlinks
 ```
 
-On a new machine, just:
+## What stays where
 
-```bash
-git clone <your-repo>
-cd <your-repo>
-./setup.sh          # re-creates the symlinks / imports sessions locally
-```
-
-## How it works
-
-- **Claude Code** stores sessions (and auto-memory) in `~/.claude/projects/<encoded-path>/`. `setup.sh` symlinks that directory to `.claude/sessions/`, so transcripts are written straight into the repo.
-- **opencode** keeps sessions in a global sqlite DB that can't be symlinked per-project. `setup.sh` installs an `oc` alias that launches opencode and, on exit, exports this project's sessions to `.opencode/sessions/` and stages them in git.
-- **Codex CLI** keeps state under `~/.codex/`. Sessions are stored globally (not per-project), so `setup.sh` filters them by the `cwd` recorded in each rollout and copies only this project's sessions into `.codex/sessions/`; it symlinks `memories` and `skills` (excluding the bundled `.system/` skills).
+| | Project repo (can be public) | Vault (must be PRIVATE) |
+|---|---|---|
+| Claude | `.claude/skills/`, `.claude/memory/` | sessions + auto-memory |
+| opencode | — | exported sessions |
+| Codex | — | sessions, memories, skills |
 
 ## Commands
 
@@ -55,16 +55,16 @@ cd <your-repo>
 ./setup.sh claude       # claude only
 ./setup.sh opencode     # opencode only
 ./setup.sh codex        # codex only
-./setup.sh oc           # (alias target) launch opencode, export sessions on exit
+./setup.sh oc           # launch opencode, export sessions to the vault
 ./setup.sh --help       # help
 ```
 
 ## Caveats
 
-- **Codex sessions are filtered per-project** (by the `cwd` in each rollout), but `memories` are global by design (a single long-term memory). New codex sessions are only picked up when you re-run `./setup.sh codex`.
-- **Sessions may contain secrets.** Transcripts record everything typed — including API keys. Never paste keys into chat; keep them in env vars / `~/.claude/settings.json`. `setup.sh` never writes or stores keys.
+- **Keep the vault PRIVATE.** Transcripts record everything typed — including API keys. Never make `~/.agent-vault` public.
 - The `oc` alias writes only an alias line to `~/.zshrc` (never a key). Run `source ~/.zshrc` to activate it.
 - Idempotent: safe to re-run.
+- Set `AGENT_VAULT` to override the vault location.
 
 ## API key
 
