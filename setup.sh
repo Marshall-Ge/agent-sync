@@ -193,6 +193,64 @@ print(cwd)
 PYEOF
 }
 
+# Rebuild codex's sqlite index (state_*.sqlite `threads` table) for any rollouts
+# present in ~/.codex/sessions but missing from the index. codex's /resume lists
+# sessions from this index, not from the JSONL files, so restoring files alone
+# is not enough. Idempotent (INSERT OR IGNORE).
+codex_rebuild_index() {
+  local db src
+  db="$(ls -t "$HOME"/.codex/state_*.sqlite 2>/dev/null | head -1)"
+  [ -n "$db" ] || return 0
+  src="$HOME/.codex/sessions"
+  [ -d "$src" ] || return 0
+  python3 - "$src" "$db" <<'PYEOF'
+import json, sys, sqlite3, datetime, os
+src, db = sys.argv[1], sys.argv[2]
+con = sqlite3.connect(db)
+added = 0
+for root, _, files in os.walk(src):
+    for fn in files:
+        if not fn.startswith("rollout-") or not fn.endswith(".jsonl"):
+            continue
+        path = os.path.join(root, fn)
+        meta = None
+        for line in open(path, errors="replace"):
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            if d.get("type") == "session_meta":
+                meta = d.get("payload", {})
+                break
+        if not meta or not meta.get("id"):
+            continue
+        sid = meta["id"]
+        if con.execute("SELECT 1 FROM threads WHERE id=?", (sid,)).fetchone():
+            continue
+        cwd = meta.get("cwd", "")
+        ts = meta.get("timestamp", "")
+        try:
+            epoch = int(datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
+        except Exception:
+            epoch = 0
+        sandbox = json.dumps({"type": "workspace-write", "writable_roots": [cwd],
+                              "network_access": False, "exclude_tmpdir_env_var": False,
+                              "exclude_slash_tmp": False})
+        con.execute(
+            "INSERT OR IGNORE INTO threads (id, rollout_path, created_at, updated_at, "
+            "source, model_provider, cwd, title, sandbox_policy, approval_mode, "
+            "cli_version, memory_mode, history_mode, preview) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (sid, path, epoch, epoch, meta.get("source", "cli"),
+             meta.get("model_provider", "openai"), cwd, "", sandbox, "on-request",
+             meta.get("cli_version", ""), "enabled", "legacy", ""))
+        added += 1
+con.commit()
+con.close()
+print(f"    codex index rebuilt: {added} session(s) added")
+PYEOF
+}
+
 sync_codex_sessions() {
   local src="$HOME/.codex/sessions" dst="$PROJECT/.codex/sessions" n=0 cwd name date dest
   if [ -L "$src" ]; then
@@ -233,6 +291,7 @@ sync_codex_sessions() {
     fi
   done < <(find -L "$src" -name 'rollout-*.jsonl' 2>/dev/null)
   ok "copied $n codex session(s) for this project (re-run to pick up new ones)"
+  codex_rebuild_index
 }
 
 # --- dsh (DeepSeek Harness) -------------------------------------------------
