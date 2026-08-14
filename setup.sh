@@ -228,6 +228,7 @@ for root, _, files in os.walk(src):
         if con.execute("SELECT 1 FROM threads WHERE id=?", (sid,)).fetchone():
             continue
         cwd = meta.get("cwd", "")
+        name = os.path.basename(cwd.rstrip("/")) or "restored"
         ts = meta.get("timestamp", "")
         try:
             epoch = int(datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
@@ -239,11 +240,11 @@ for root, _, files in os.walk(src):
         con.execute(
             "INSERT OR IGNORE INTO threads (id, rollout_path, created_at, updated_at, "
             "source, model_provider, cwd, title, sandbox_policy, approval_mode, "
-            "cli_version, memory_mode, history_mode, preview) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "cli_version, memory_mode, history_mode, preview, first_user_message) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (sid, path, epoch, epoch, meta.get("source", "cli"),
-             meta.get("model_provider", "openai"), cwd, "", sandbox, "on-request",
-             meta.get("cli_version", ""), "enabled", "legacy", ""))
+             meta.get("model_provider", "openai"), cwd, name, sandbox, "on-request",
+             meta.get("cli_version", ""), "enabled", "legacy", name, name))
         added += 1
 con.commit()
 con.close()
