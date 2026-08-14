@@ -9,10 +9,10 @@
 #
 # Usage (copy this file into your project root, then run):
 #   ./setup.sh                              show this help (no args -> help)
-#   ./setup.sh claude [opencode] [codex] [dsh]  init any combination of tools
+#   ./setup.sh claude [opencode] [codex] [dsh]  init any combination of tools, codex under [EXPERIMENTAL]
 #   ./setup.sh all                          init claude + opencode + dsh (codex separate)
 #   ./setup.sh sync                         collect latest agent data (run BEFORE git commit+push)
-#   ./setup.sh oc                           wrapper: launch opencode, then export sessions to git
+#   ./setup.sh oc                           wrapper: launch opencode, then export sessions to git，usually directly use `oc` after set `source ~/.zshrc`
 #   ./setup.sh --help                       this help
 #
 # Idempotent: safe to re-run. Never writes API keys.
@@ -373,3 +373,8 @@ info "usage / 用法:"
 info "  claude / codex / dsh  -> 直接运行 (run directly)"
 info "  opencode        -> 用 'oc' 运行,不要跑 opencode，需要做一层包装 (use 'oc', NOT bare 'opencode')"
 info "  keep this repo PRIVATE while developing / 开发期请用私有仓库 — 待开发完成后删除跨级共享session"
+info "workflow / 工作流:"
+info "host1 set `./setup.sh claude` -> chat -> ./setup.sh sync -> git push"
+info "host2 git pull -> set `./setup.sh claude` -> chat -> ./setup.sh sync -> git push"
+info "host1 git pull -> chat -> ./setup.sh sync -> git push"
+info "host2 git pull -> chat -> ./setup.sh sync -> git push"
