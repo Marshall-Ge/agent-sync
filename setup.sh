@@ -4,13 +4,13 @@
 # Syncs memory / sessions / skills across machines for coding agents:
 #   claude   (Claude Code)        sessions + auto-memory -> snapshot into .claude/sessions/
 #   opencode (opencode)           sessions -> export/import into .opencode/sessions/ + `oc` wrapper
-#   codex    (Codex CLI)          sessions -> copy filtered by cwd; memories/skills -> snapshot
+#   codex    (Codex CLI) [EXPERIMENTAL] heavy: syncs global ~/.codex state (all projects)
 #   dsh      (DeepSeek Harness)   sessions -> snapshot into .dsh/sessions/
 #
 # Usage (copy this file into your project root, then run):
 #   ./setup.sh                              show this help (no args -> help)
 #   ./setup.sh claude [opencode] [codex] [dsh]  init any combination of tools
-#   ./setup.sh all                          init all four
+#   ./setup.sh all                          init claude + opencode + dsh (codex separate)
 #   ./setup.sh sync                         collect latest agent data (run BEFORE git commit+push)
 #   ./setup.sh oc                           wrapper: launch opencode, then export sessions to git
 #   ./setup.sh --help                       this help
@@ -164,7 +164,9 @@ init_opencode() {
 # --- codex ------------------------------------------------------------------
 
 init_codex() {
-  info "codex (Codex CLI)"
+  info "codex (Codex CLI) [EXPERIMENTAL]"
+  warn "codex sync is heavy: it copies the global ~/.codex state (all projects'"
+  warn "sessions). New 'paginated' sessions may not sync 'continue' content."
   seed_dir "$PROJECT/.codex/sessions"  "Codex CLI sessions for THIS project only (filtered by cwd)."
   seed_dir "$PROJECT/.codex/memories"  "Snapshot of global ~/.codex/memories."
   seed_dir "$PROJECT/.codex/skills"    "Snapshot of global ~/.codex/skills (bundled .system/ gitignored)."
@@ -360,7 +362,7 @@ for a in "$@"; do
     opencode) init_opencode ;;
     codex)    init_codex ;;
     dsh)      init_dsh ;;
-    all)      init_claude; init_opencode; init_codex; init_dsh ;;
+    all)      init_claude; init_opencode; init_dsh ;;
     *) warn "unknown tool: $a"; usage; exit 1 ;;
   esac
 done
