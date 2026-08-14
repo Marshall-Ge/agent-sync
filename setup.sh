@@ -124,32 +124,39 @@ init_claude() {
 
 # --- opencode ---------------------------------------------------------------
 
+# Import opencode sessions from the project into the local db (re-import if the
+# exported JSON is newer than the local db). Used by both init and sync, so a
+# session updated on another machine is pulled back in.
+opencode_import() {
+  if ! command -v opencode >/dev/null 2>&1; then
+    warn "opencode not installed (brew install opencode-ai); skipping import"
+    return 0
+  fi
+  local db="${OPENCODE_DB:-$HOME/.local/share/opencode/opencode.db}" n=0 meta id updated db_updated
+  for f in "$PROJECT"/.opencode/sessions/*.json; do
+    [ -e "$f" ] || continue
+    meta="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));i=d.get("info",{});print(i.get("id",""),i.get("time",{}).get("updated",0))' "$f" 2>/dev/null || true)"
+    id="${meta%% *}"; updated="${meta##* }"
+    if [ -z "$id" ]; then warn "no id in $(basename "$f")"; continue; fi
+    if [ -f "$db" ]; then
+      db_updated="$(sqlite3 "$db" "SELECT time_updated FROM session WHERE id='$id';" 2>/dev/null | head -1)"
+      if [ -n "$db_updated" ] && [ "$db_updated" -ge "$updated" ] 2>/dev/null; then
+        ok "skip up-to-date session $id"; continue
+      fi
+    fi
+    if opencode import "$f" >/dev/null 2>&1; then
+      ok "imported session $id"; n=$((n+1))
+    else
+      warn "import failed: $(basename "$f")"
+    fi
+  done
+  info "  imported $n opencode session(s)"
+}
+
 init_opencode() {
   info "opencode"
   seed_dir "$PROJECT/.opencode/sessions" "Exported opencode sessions (JSON). Auto-exported by the oc alias after each run."
-  if ! command -v opencode >/dev/null 2>&1; then
-    warn "opencode not installed (brew install opencode-ai); skipping import"
-  else
-    local db="${OPENCODE_DB:-$HOME/.local/share/opencode/opencode.db}" n=0 meta id updated db_updated
-    for f in "$PROJECT"/.opencode/sessions/*.json; do
-      [ -e "$f" ] || continue
-      meta="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));i=d.get("info",{});print(i.get("id",""),i.get("time",{}).get("updated",0))' "$f" 2>/dev/null || true)"
-      id="${meta%% *}"; updated="${meta##* }"
-      if [ -z "$id" ]; then warn "no id in $(basename "$f")"; continue; fi
-      if [ -f "$db" ]; then
-        db_updated="$(sqlite3 "$db" "SELECT time_updated FROM session WHERE id='$id';" 2>/dev/null | head -1)"
-        if [ -n "$db_updated" ] && [ "$db_updated" -ge "$updated" ] 2>/dev/null; then
-          ok "skip up-to-date session $id"; continue
-        fi
-      fi
-      if opencode import "$f" >/dev/null 2>&1; then
-        ok "imported session $id"; n=$((n+1))
-      else
-        warn "import failed: $(basename "$f")"
-      fi
-    done
-    info "  imported $n opencode session(s)"
-  fi
+  opencode_import
   touch "$PROJECT/.agent-sync"
   write_oc_func
 }
@@ -285,7 +292,7 @@ sync_all() {
   snapshot_dir "$HOME/.codex/memories" "$PROJECT/.codex/memories"
   snapshot_dir "$HOME/.codex/skills"   "$PROJECT/.codex/skills"
   sync_codex_sessions
-  info "opencode sessions export on exit via 'oc' — nothing to collect here."
+  opencode_import
   echo
   info "now commit + push manually to sync across machines:"
   info "  git add .claude .opencode .codex .dsh && git commit -m 'sync agent data' && git push"
