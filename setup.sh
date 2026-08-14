@@ -193,106 +193,35 @@ print(cwd)
 PYEOF
 }
 
-# Rebuild codex's sqlite index (state_*.sqlite `threads` table) for any rollouts
-# present in ~/.codex/sessions but missing from the index. codex's /resume lists
-# sessions from this index, not from the JSONL files, so restoring files alone
-# is not enough. Idempotent (INSERT OR IGNORE).
-codex_rebuild_index() {
-  local db src
-  db="$(ls -t "$HOME"/.codex/state_*.sqlite 2>/dev/null | head -1)"
-  [ -n "$db" ] || return 0
-  src="$HOME/.codex/sessions"
-  [ -d "$src" ] || return 0
-  python3 - "$src" "$db" <<'PYEOF'
-import json, sys, sqlite3, datetime, os
-src, db = sys.argv[1], sys.argv[2]
-con = sqlite3.connect(db)
-added = 0
-for root, _, files in os.walk(src):
-    for fn in files:
-        if not fn.startswith("rollout-") or not fn.endswith(".jsonl"):
-            continue
-        path = os.path.join(root, fn)
-        meta = None
-        for line in open(path, errors="replace"):
-            try:
-                d = json.loads(line)
-            except Exception:
-                continue
-            if d.get("type") == "session_meta":
-                meta = d.get("payload", {})
-                break
-        if not meta or not meta.get("id"):
-            continue
-        sid = meta["id"]
-        if con.execute("SELECT 1 FROM threads WHERE id=?", (sid,)).fetchone():
-            continue
-        cwd = meta.get("cwd", "")
-        name = os.path.basename(cwd.rstrip("/")) or "restored"
-        ts = meta.get("timestamp", "")
-        try:
-            epoch = int(datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
-        except Exception:
-            epoch = 0
-        sandbox = json.dumps({"type": "workspace-write", "writable_roots": [cwd],
-                              "network_access": False, "exclude_tmpdir_env_var": False,
-                              "exclude_slash_tmp": False})
-        con.execute(
-            "INSERT OR IGNORE INTO threads (id, rollout_path, created_at, updated_at, "
-            "source, model_provider, cwd, title, sandbox_policy, approval_mode, "
-            "cli_version, memory_mode, history_mode, preview, first_user_message) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (sid, path, epoch, epoch, meta.get("source", "cli"),
-             meta.get("model_provider", "openai"), cwd, name, sandbox, "on-request",
-             meta.get("cli_version", ""), "enabled", "legacy", name, name))
-        added += 1
-con.commit()
-con.close()
-print(f"    codex index rebuilt: {added} session(s) added")
-PYEOF
-}
-
 sync_codex_sessions() {
-  local src="$HOME/.codex/sessions" dst="$PROJECT/.codex/sessions" n=0 cwd name date dest
+  local src="$HOME/.codex/sessions" dst="$PROJECT/.codex/sessions" n=0 cwd rel
   if [ -L "$src" ]; then
     warn "~/.codex/sessions is a symlink (left by an old agent-sync); restore it, then re-run"
     return 0
   fi
   mkdir -p "$src" "$dst"
-  # restore: project -> native, rebuilt into the date-based layout codex uses
-  # (rollout-YYYY-MM-DDT... -> sessions/YYYY/MM/DD/), so a fresh machine gets
-  # its sessions back. codex may still need to re-index on startup.
-  for f in "$dst"/rollout-*.jsonl; do
-    [ -e "$f" ] || continue
-    name="$(basename "$f")"
-    date="$(printf '%s' "$name" | sed -E 's/^rollout-([0-9]{4})-([0-9]{2})-([0-9]{2})T.*/\1\/\2\/\3/')"
-    if [ "$date" != "$name" ]; then
-      dest="$src/$date/$name"
-      if [ "$f" -nt "$dest" ]; then
-        mkdir -p "$(dirname "$dest")"
-        cp -p "$f" "$dest"
-      fi
-    fi
-  done
-  # sync: native -> project. Capture a rollout if it's already known to this
-  # project (so a session continued on another machine — whose cwd is the old
-  # machine's path — still gets updated), or if it's a brand-new local session
-  # whose cwd matches this project.
+  # restore: project -> native, preserving codex's date-based layout
+  # (YYYY/MM/DD/). codex re-indexes by scanning ~/.codex/sessions on startup,
+  # so no manual sqlite work is needed.
+  _merge_newer "$dst" "$src"
+  # sync: native -> project, preserving the date-based layout. Capture a rollout
+  # if it's already known to this project (a session continued on another machine
+  # keeps its original cwd), or a brand-new local session whose cwd matches.
   while IFS= read -r f; do
-    name="$(basename "$f")"
-    if ! [ -e "$dst/$name" ]; then
+    rel="${f#"$src"/}"
+    if ! [ -e "$dst/$rel" ]; then
       cwd="$(codex_rollout_cwd "$f")"
       if [ -z "$cwd" ] || ([ "$cwd" != "$PROJECT" ] && [[ "$cwd" != "$PROJECT/"* ]]); then
         continue
       fi
     fi
-    if [ "$f" -nt "$dst/$name" ]; then
-      cp -p "$f" "$dst/$name"
+    if [ "$f" -nt "$dst/$rel" ]; then
+      mkdir -p "$(dirname "$dst/$rel")"
+      cp -p "$f" "$dst/$rel"
       n=$((n+1))
     fi
   done < <(find -L "$src" -name 'rollout-*.jsonl' 2>/dev/null)
   ok "copied $n codex session(s) for this project (re-run to pick up new ones)"
-  codex_rebuild_index
 }
 
 # --- dsh (DeepSeek Harness) -------------------------------------------------
