@@ -175,12 +175,28 @@ PYEOF
 }
 
 sync_codex_sessions() {
-  local src="$HOME/.codex/sessions" dst="$PROJECT/.codex/sessions" n=0 cwd name
-  if [ ! -d "$src" ] || [ -L "$src" ]; then
-    warn "~/.codex/sessions missing or is a symlink (left by an old agent-sync); restore it, then re-run"
+  local src="$HOME/.codex/sessions" dst="$PROJECT/.codex/sessions" n=0 cwd name date dest
+  if [ -L "$src" ]; then
+    warn "~/.codex/sessions is a symlink (left by an old agent-sync); restore it, then re-run"
     return 0
   fi
-  mkdir -p "$dst"
+  mkdir -p "$src" "$dst"
+  # restore: project -> native, rebuilt into the date-based layout codex uses
+  # (rollout-YYYY-MM-DDT... -> sessions/YYYY/MM/DD/), so a fresh machine gets
+  # its sessions back. codex may still need to re-index on startup.
+  for f in "$dst"/rollout-*.jsonl; do
+    [ -e "$f" ] || continue
+    name="$(basename "$f")"
+    date="$(printf '%s' "$name" | sed -E 's/^rollout-([0-9]{4})-([0-9]{2})-([0-9]{2})T.*/\1\/\2\/\3/')"
+    if [ "$date" != "$name" ]; then
+      dest="$src/$date/$name"
+      if [ ! -e "$dest" ]; then
+        mkdir -p "$(dirname "$dest")"
+        cp -p "$f" "$dest"
+      fi
+    fi
+  done
+  # sync: native -> project (cwd-filtered)
   while IFS= read -r f; do
     cwd="$(codex_rollout_cwd "$f")"
     if [ -n "$cwd" ] && { [ "$cwd" = "$PROJECT" ] || [[ "$cwd" == "$PROJECT/"* ]]; }; then
