@@ -48,6 +48,7 @@ _merge_newer() {  # $1 = source dir, $2 = dest dir
     if [ "$f" -nt "$dst/$rel" ]; then
       mkdir -p "$(dirname "$dst/$rel")"
       cp -p "$f" "$dst/$rel"
+      _merge_copied=$(( ${_merge_copied:-0} + 1 ))
     fi
   done < <(find "$src" -type f -print0 2>/dev/null)
 }
@@ -203,6 +204,7 @@ sync_codex_sessions() {
   # restore: project -> native, preserving codex's date-based layout
   # (YYYY/MM/DD/). codex re-indexes by scanning ~/.codex/sessions on startup,
   # so no manual sqlite work is needed.
+  _merge_copied=0
   _merge_newer "$dst" "$src"
   # sync: native -> project, preserving the date-based layout. Capture a rollout
   # if it's already known to this project (a session continued on another machine
@@ -222,7 +224,9 @@ sync_codex_sessions() {
     fi
   done < <(find -L "$src" -name 'rollout-*.jsonl' 2>/dev/null)
   ok "copied $n codex session(s) for this project (re-run to pick up new ones)"
-  codex_reset_backfill
+  if [ "${_merge_copied:-0}" -gt 0 ]; then
+    codex_reset_backfill
+  fi
 }
 
 # codex rebuilds its sqlite index from the rollout JSONL files via a "backfill"
