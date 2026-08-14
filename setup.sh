@@ -222,6 +222,19 @@ sync_codex_sessions() {
     fi
   done < <(find -L "$src" -name 'rollout-*.jsonl' 2>/dev/null)
   ok "copied $n codex session(s) for this project (re-run to pick up new ones)"
+  codex_reset_backfill
+}
+
+# codex rebuilds its sqlite index from the rollout JSONL files via a "backfill"
+# that only runs when backfill_state.status != 'complete' (triggered on TUI
+# startup). Reset it to 'pending' after restoring files, so the next `codex`
+# launch re-scans ~/.codex/sessions and indexes the restored sessions.
+codex_reset_backfill() {
+  local db
+  db="$(ls -t "$HOME"/.codex/state_*.sqlite 2>/dev/null | head -1)"
+  [ -n "$db" ] || return 0
+  sqlite3 "$db" "UPDATE backfill_state SET status='pending', last_watermark=NULL WHERE id=1;" 2>/dev/null || true
+  ok "reset codex backfill state (launch codex once to rebuild the index)"
 }
 
 # --- dsh (DeepSeek Harness) -------------------------------------------------
