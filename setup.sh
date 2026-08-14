@@ -129,12 +129,17 @@ init_opencode() {
   if ! command -v opencode >/dev/null 2>&1; then
     warn "opencode not installed (brew install opencode-ai); skipping import"
   else
-    local db="${OPENCODE_DB:-$HOME/.local/share/opencode/opencode.db}" n=0 id
+    local db="${OPENCODE_DB:-$HOME/.local/share/opencode/opencode.db}" n=0 meta id updated db_updated
     for f in "$PROJECT"/.opencode/sessions/*.json; do
       [ -e "$f" ] || continue
-      id="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("info",{}).get("id",""))' "$f" 2>/dev/null || true)"
-      if [ -n "$id" ] && [ -f "$db" ] && sqlite3 "$db" "SELECT 1 FROM session WHERE id='$id';" 2>/dev/null | grep -q 1; then
-        ok "skip existing session $id"; continue
+      meta="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));i=d.get("info",{});print(i.get("id",""),i.get("time",{}).get("updated",0))' "$f" 2>/dev/null || true)"
+      id="${meta%% *}"; updated="${meta##* }"
+      if [ -z "$id" ]; then warn "no id in $(basename "$f")"; continue; fi
+      if [ -f "$db" ]; then
+        db_updated="$(sqlite3 "$db" "SELECT time_updated FROM session WHERE id='$id';" 2>/dev/null | head -1)"
+        if [ -n "$db_updated" ] && [ "$db_updated" -ge "$updated" ] 2>/dev/null; then
+          ok "skip up-to-date session $id"; continue
+        fi
       fi
       if opencode import "$f" >/dev/null 2>&1; then
         ok "imported session $id"; n=$((n+1))
@@ -204,21 +209,27 @@ sync_codex_sessions() {
     date="$(printf '%s' "$name" | sed -E 's/^rollout-([0-9]{4})-([0-9]{2})-([0-9]{2})T.*/\1\/\2\/\3/')"
     if [ "$date" != "$name" ]; then
       dest="$src/$date/$name"
-      if [ ! -e "$dest" ]; then
+      if [ "$f" -nt "$dest" ]; then
         mkdir -p "$(dirname "$dest")"
         cp -p "$f" "$dest"
       fi
     fi
   done
-  # sync: native -> project (cwd-filtered)
+  # sync: native -> project. Capture a rollout if it's already known to this
+  # project (so a session continued on another machine — whose cwd is the old
+  # machine's path — still gets updated), or if it's a brand-new local session
+  # whose cwd matches this project.
   while IFS= read -r f; do
-    cwd="$(codex_rollout_cwd "$f")"
-    if [ -n "$cwd" ] && { [ "$cwd" = "$PROJECT" ] || [[ "$cwd" == "$PROJECT/"* ]]; }; then
-      name="$(basename "$f")"
-      if [ ! -e "$dst/$name" ]; then
-        cp -p "$f" "$dst/$name"
-        n=$((n+1))
+    name="$(basename "$f")"
+    if ! [ -e "$dst/$name" ]; then
+      cwd="$(codex_rollout_cwd "$f")"
+      if [ -z "$cwd" ] || ([ "$cwd" != "$PROJECT" ] && [[ "$cwd" != "$PROJECT/"* ]]); then
+        continue
       fi
+    fi
+    if [ "$f" -nt "$dst/$name" ]; then
+      cp -p "$f" "$dst/$name"
+      n=$((n+1))
     fi
   done < <(find -L "$src" -name 'rollout-*.jsonl' 2>/dev/null)
   ok "copied $n codex session(s) for this project (re-run to pick up new ones)"
