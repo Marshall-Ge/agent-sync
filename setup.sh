@@ -38,15 +38,29 @@ usage() {
 # The encoded project path Claude Code uses as its per-project storage dir name.
 encoded() { printf '%s' "$PROJECT" | sed 's|[^A-Za-z0-9]|-|g'; }
 
+# Copy files from $src into $dst that are missing or newer than the copy in
+# $dst (merge by mtime). macOS cp has no -u, so compare mtimes manually.
+_merge_newer() {  # $1 = source dir, $2 = dest dir
+  local src="$1" dst="$2" f rel
+  [ -d "$src" ] || return 0
+  while IFS= read -r -d '' f; do
+    rel="${f#"$src"/}"
+    if [ "$f" -nt "$dst/$rel" ]; then
+      mkdir -p "$(dirname "$dst/$rel")"
+      cp -p "$f" "$dst/$rel"
+    fi
+  done < <(find "$src" -type f -print0 2>/dev/null)
+}
+
 # Snapshot a tool's native/global dir into the project (no symlink — the tool
-# keeps working exactly as before). Merges both ways: add sessions from other
-# machines (project -> native, add-only), then capture the latest local state
-# (native -> project, overwrite).
+# keeps working exactly as before). Merges by mtime both ways: newer files win
+# in each direction, so a session continued on another machine is picked up and
+# a locally-updated session is captured.
 snapshot_dir() {  # $1 = native/global dir, $2 = project dir
   local g="$1" p="$2"
   mkdir -p "$g" "$p"
-  cp -Rnp "$p/." "$g/" 2>/dev/null || true
-  cp -Rp "$g/." "$p/" 2>/dev/null || true
+  _merge_newer "$p" "$g"   # project -> native (newer wins)
+  _merge_newer "$g" "$p"   # native -> project (newer wins)
   ok "snapshot synced: $p"
 }
 
